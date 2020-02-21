@@ -10,13 +10,13 @@ public class PlayerController : Camera
     public float move_forward = 0;
     public float move_right = 0;
     public float move_up = 0;
-    public float look_right = 0;
-    public float look_up = 0;
 
     private float _cameraAngle = 0f;
 
     // settings
     float mouseSensitivity = 0.2f;
+
+    public PlayerCmd pCmd;
 
     public override void _Ready()
     {
@@ -30,8 +30,39 @@ public class PlayerController : Camera
 
     public override void _PhysicsProcess(float delta)
     {
-        Basis aim = this.GetGlobalTransform().basis;
-        _network.SendPMovement(1, _player.ID, move_forward, move_right, move_up, look_right, look_up, aim, _cameraAngle);
+        if (Input.IsActionJustPressed("jump"))
+        {
+            move_up = 1;
+        }
+        if (Input.IsActionJustReleased("jump"))
+        {
+            move_up = -1;
+        }
+        move_forward = 0;
+        if (Input.IsActionPressed("move_forward"))
+        {
+            move_forward += 1;
+        }
+        if (Input.IsActionPressed("move_back"))
+        {
+            move_forward += -1;
+        }
+        move_right = 0;
+        if (Input.IsActionPressed("move_right"))
+        {
+            move_right += 1;
+        }
+        if (Input.IsActionPressed("move_left"))
+        {
+            move_right += -1;
+        }
+
+        pCmd.move_forward = move_forward;
+        pCmd.move_right = move_right;
+        pCmd.move_up = move_up;
+        pCmd.aim = this.GlobalTransform.basis;
+        pCmd.cam_angle = _cameraAngle;
+        pCmd.rotation = _player.Mesh.Rotation;
     }
 
     public override void _Input(InputEvent e)
@@ -43,8 +74,8 @@ public class PlayerController : Camera
             {
                 if (em.Relative.Length() > 0)
                 {          
-                    look_right = em.Relative.x;
-                    look_up = em.Relative.y;
+                    float look_right = em.Relative.x;
+                    float look_up = em.Relative.y;
 
                     // limit how far up/down we look
                     // invert mouse
@@ -94,32 +125,7 @@ public class PlayerController : Camera
             {
                 Impulses.Add(Impulse.Attack);
             }*/
-            if (Input.IsActionJustPressed("jump"))
-            {
-                move_up = 1;
-            }
-            if (Input.IsActionJustReleased("jump"))
-            {
-                move_up = -1;
-            }
-            move_forward = 0;
-            if (Input.IsActionPressed("move_forward"))
-            {
-                move_forward += 1;
-            }
-            if (Input.IsActionPressed("move_back"))
-            {
-                move_forward += -1;
-            }
-            move_right = 0;
-            if (Input.IsActionPressed("move_right"))
-            {
-                move_right += 1;
-            }
-            if (Input.IsActionPressed("move_left"))
-            {
-                move_right += -1;
-            }
+            
         }
     }    
 }

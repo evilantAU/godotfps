@@ -1,5 +1,7 @@
 using Godot;
 using System;
+using System.Collections.Generic;
+using System.Collections;
 
 public class World : Node
 {
@@ -10,8 +12,27 @@ public class World : Node
 
     private Vector3 _up = new Vector3(0,1,0);
     public Vector3 Up { get { return _up; }}
-    
 
+    private float _gravity = 80f;
+    public float Gravity { get { return _gravity; }}
+
+    private float _waterFriction = 0.4f;
+    public float WaterFriction { get { return _waterFriction; }}
+
+    private float _flyFriction = 0.4f;
+    public float FlyFriction { get { return _flyFriction; }}
+
+    private float _groundFriction = 0.6f;
+    public float GroundFriction { get { return _groundFriction; }}
+
+    private float _stopSpeed = 10f;
+    public float StopSpeed { get { return _stopSpeed; }}
+
+    private float _accelerate = 1f; // qw 10f
+    public float Accelerate { get { return _accelerate; }}
+
+    private List<string> _playerNodeNames = new List<string>();
+    
     private Network _network;
 
     public override void _Ready()
@@ -26,7 +47,6 @@ public class World : Node
             Player p = GetNodeOrNull(peer.ToString()) as Player;
             if (p != null)
             {
-                //p.ProcessMovement(delta);
                 p.ProcessMovement(delta);
             }
         }
@@ -34,6 +54,7 @@ public class World : Node
 
     public void StartWorld()
     {
+        Input.SetMouseMode(Input.MouseMode.Visible);
         PackedScene main = (PackedScene)ResourceLoader.Load("res://Maps/lastresort_b5.tscn");
         Spatial inst = (Spatial)main.Instance();
         Initial of = GetNode("/root/Initial") as Initial;
@@ -46,90 +67,127 @@ public class World : Node
         foreach(Spatial ent in ents)
         {
             Godot.Collections.Dictionary fields = ent.Get("properties") as Godot.Collections.Dictionary;
-            object classname;
-            try
+
+            if (fields != null)
             {
-                if (fields != null)
+                foreach (DictionaryEntry kvp in fields)
                 {
-                    if (fields.ContainsKey("classname"))
+                    if (kvp.Key.ToString().ToLower().Contains("classname"))
                     {
-                        fields.TryGetValue("classname", out classname);
-                        switch (classname.ToString())
+                        switch (kvp.Value.ToString().ToLower())
                         {
                             case "info_player_start":
-                                object team;
-                                fields.TryGetValue("allowteams", out team);
-                                if (team.ToString().Contains("blue"))
+                                foreach(DictionaryEntry kvp2 in fields)
                                 {
-                                    spawnsTeam1.Add(ent);
-                                }
-                                if (team.ToString().Contains("red"))
-                                {
-                                    spawnsTeam2.Add(ent);
+                                    switch(kvp2.Key.ToString().ToLower())
+                                    {
+                                        case "allowteams":
+                                            string team = kvp2.Value.ToString().ToLower();
+                                            if (team.Contains("blue"))
+                                            {
+                                                spawnsTeam1.Add(ent);
+                                            }
+                                            if (team.Contains("red"))
+                                            {
+                                                spawnsTeam2.Add(ent);
+                                            }
+                                            break;
+                                    }
                                 }
                                 break;
                         }
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                GD.Print("Error: " + ex.ToString());
-            }
+            
         }
 
         Spatial triggers = GetNode("/root/Initial/Map/QodotMap/Triggers") as Spatial;
         Godot.Collections.Array triggerents = triggers.GetChildren();
+        List<Trigger_Door> doors = new List<Trigger_Door>();
 
         foreach (Area ent in triggerents)
         {
             Godot.Collections.Dictionary fields = ent.Get("properties") as Godot.Collections.Dictionary;
-            object classname = null;
-            if (fields != null)
-            {
-                if (fields.ContainsKey("classname"))
-                {
-                    fields.TryGetValue("classname", out classname);
-                }
-                if (classname != null && classname.ToString() == "trigger_door")
-                {
-                    // https://github.com/godotengine/godot/issues/31994#issuecomment-570073343
-                    ulong objId = Convert.ToUInt64(ent.GetInstanceId());
-                    ent.SetScript(ResourceLoader.Load("Scripts/Trigger_Door.cs"));
-                    
 
-                    Trigger_Door newEnt = GD.InstanceFromId(objId) as Trigger_Door;
-                    newEnt.SetProcess(true);
-                    newEnt.Notification(NotificationReady);
-                    newEnt.Init(fields);
+            foreach(DictionaryEntry kvp in fields)
+            {
+                if (kvp.Key.ToString().ToLower() == "classname")
+                {
+                    if (kvp.Value.ToString().ToLower() == "trigger_door")
+                    {
+                        // https://github.com/godotengine/godot/issues/31994#issuecomment-570073343
+                        ulong objId = Convert.ToUInt64(ent.GetInstanceId());
+                        ent.SetScript(ResourceLoader.Load("Scripts/Trigger_Door.cs"));
+                        
+                        Trigger_Door newEnt = GD.InstanceFromId(objId) as Trigger_Door;
+                        newEnt.SetProcess(true);
+                        newEnt.Notification(NotificationReady);
+                        newEnt.Init(fields);
+
+                        doors.Add(newEnt);
+                    }
                 }
             }
-            
+        }
+
+        this.LinkDoors(doors);
+    }
+
+    private void LinkDoors(List<Trigger_Door> doors)
+    {
+        foreach (Trigger_Door door in doors)
+        {
+            AABB bbox = door.GetAABB();
+            bbox = bbox.Grow(0.2f);
+
+            foreach (Trigger_Door dtest in doors)
+            {
+                if (dtest != door)
+                {
+                    AABB testBbox = dtest.GetAABB();
+                    if (bbox.Intersects(testBbox))
+                    {
+                        door.AddLinkedDoor(dtest);
+                    }
+                }
+            }
         }
     }
 
-    public Player AddPlayer(int networkID, bool playerControlled)
+    public PlayerController AddPlayer(int networkID, bool playerControlled)
     {
+        PlayerController pc = null;
         PackedScene playerScene = (PackedScene)ResourceLoader.Load("res://Scenes/Player.tscn");
         Player player = (Player)playerScene.Instance();
         this.AddChild(player);
-        player.SetName(networkID.ToString());
+        player.Name = networkID.ToString();
         player.ID = networkID;
+        _playerNodeNames.Add(player.Name);
 
         if (playerControlled)
         {
             PackedScene controller = ResourceLoader.Load("res://Scenes/PlayerController.tscn") as PackedScene;
-            PlayerController pc = controller.Instance() as PlayerController;
+            pc = controller.Instance() as PlayerController;
             player.GetNode("Head").AddChild(pc);
             pc.Init(player);
+            pc.SetProcess(true);
+            pc.Notification(NotificationReady);
+            Input.SetMouseMode(Input.MouseMode.Captured);
         }
-        
-        return player;
+        player.Team = 1;
+
+        if (IsNetworkMaster())
+        {
+            Spawn(player);
+        }
+
+        return pc;
     }
 
     public void Spawn(Player p)
     {
-        p.SetTranslation(GetNextSpawn(p.Team));
+        p.Translation = GetNextSpawn(p.Team);
     }
 
     public Vector3 GetNextSpawn(int teamID)
@@ -158,6 +216,6 @@ public class World : Node
                     
                 break;
             }
-            return teamID == 9 ? new Vector3(0,10,0) : spawn.GetTranslation();
+            return teamID == 9 ? new Vector3(0,10,0) : spawn.Translation;
     }
 }
